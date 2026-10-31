@@ -221,7 +221,7 @@ test('settings property is returned even if runtime module lookups throw at load
   const beforeCount = t.hooks.length;
   t.plugin.onLoad();
   assert.equal(typeof t.plugin.settings, 'function');
-  assert.ok(t.notified.some(x => x.includes('1.2 已启动')));
+  assert.ok(t.notified.some(x => x.includes('1.3 已启动')));
   assert.ok(t.hooks.length > beforeCount);
   assert.ok(t.walk(t.plugin.settings()).some(e => e.props?.label === '启动状态'));
   t.plugin.onUnload();

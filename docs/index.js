@@ -1,7 +1,3 @@
-/* Text Selector for Bunny / Vendetta.
- * This file is already a self-contained plugin expression; no bundler is needed.
- * No message is edited on Discord's servers. All selection stays on device.
- */
 (function () {
     "use strict";
 
@@ -439,7 +435,7 @@
             bootSuccess = true;
             bootError = "已启动";
             installMessageMenu();
-            toast("Text Selector 1.2 已启动（长按菜单测试）");
+            toast("Text Selector 1.3 已启动（可以打开设置查看状态）");
         } catch (error) {
             bootSuccess = false;
             bootError = String(error);
@@ -474,7 +470,7 @@
             var react = React || (v && v.metro && v.metro.common && v.metro.common.React);
             var native = RN || (v && v.metro && v.metro.common && v.metro.common.ReactNative);
             if (react && native && native.Text)
-                return react.createElement(native.Text, { style: { padding: 16 } }, "Text Selector 1.2 状态：" + bootError);
+                return react.createElement(native.Text, { style: { padding: 16 } }, "Text Selector 1.3 状态：" + bootError);
             return null;
         }
         return React.createElement(RN.ScrollView, { style: { flex: 1 } },
