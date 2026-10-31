@@ -194,3 +194,35 @@ test('inserts standalone keyed section when actions are grouped', () => {
   assert.ok(t.walk(groups[1]).some(e => e.props?.label === '编辑文字'));
   t.plugin.onUnload();
 });
+
+test('intercepts a real lazy importer function instead of treating it as a module', async () => {
+  const t = setup();
+  t.plugin.onLoad();
+  const module = { default() {} };
+  let calls = 0;
+  const args = [() => { calls++; return Promise.resolve(module); }, 'MessageLongPressActionSheet'];
+  t.before('openLazy', t.ActionSheet, args);
+  assert.equal(calls, 0, 'do not invoke importer prematurely');
+  assert.equal(typeof args[0], 'function');
+  assert.equal(await args[0](), module);
+  assert.equal(calls, 1);
+  const root = t.React.createElement('Group', {}, [
+    t.React.createElement(t.FormRow, {label:'回复', onPress(){}}),
+    t.React.createElement(t.FormRow, {label:'复制文字', onPress(){}})
+  ]);
+  const result = t.after('default', module, [{message:{content:'Importer works'}}], root);
+  assert.ok(t.walk(result).some(x => x.props?.label === '编辑文字'));
+  t.plugin.onUnload();
+});
+
+test('settings property is returned even if runtime module lookups throw at load', () => {
+  const t = setup();
+  // onLoad catches runtime errors without preventing settings from registering.
+  const beforeCount = t.hooks.length;
+  t.plugin.onLoad();
+  assert.equal(typeof t.plugin.settings, 'function');
+  assert.ok(t.notified.some(x => x.includes('1.2 已启动')));
+  assert.ok(t.hooks.length > beforeCount);
+  assert.ok(t.walk(t.plugin.settings()).some(e => e.props?.label === '启动状态'));
+  t.plugin.onUnload();
+});

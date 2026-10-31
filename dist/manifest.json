@@ -1,6 +1,6 @@
 {
   "name": "Text Selector - 编辑文字",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Add 编辑文字 to message long-press menus so you can select and copy any part of a Discord message.",
   "authors": [
     {
@@ -12,5 +12,5 @@
   "vendetta": {
     "icon": "ic_copy"
   },
-  "hash": "383682a172f9b2196a77c30a5bc230dcc8cf7c177954472b021999e778f57bf2"
+  "hash": "cbc069b35483d0dc03dbae1121d4be5f473f3a3d5c3178799b4bce047c1b3824"
 }

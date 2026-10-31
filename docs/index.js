@@ -5,19 +5,38 @@
 (function () {
     "use strict";
 
-    var v = vendetta;
-    var React = v.metro.common.React;
-    var RN = v.metro.common.ReactNative;
-    var findByProps = v.metro.findByProps;
-    var before = v.patcher.before;
-    var after = v.patcher.after;
-    var Forms = v.ui.components.Forms || {};
-    var FormRow = Forms.FormRow;
-    var FormSection = Forms.FormSection;
-    var Alert = v.ui.components.Alert;
-    var actionSheet = findByProps("openLazy", "hideActionSheet");
-    var alertManager = findByProps("openLazy", "close");
-    var clipboard = v.metro.common.clipboard;
+    // Never perform fragile module lookups while evaluating the plugin. If one
+    // of them throws, classic Vendetta/Revenge discards the entire plugin object
+    // and greys out the settings wrench.
+    var v = typeof vendetta !== "undefined" ? vendetta :
+        (typeof bunny !== "undefined" ? bunny : null);
+    var React = null, RN = null, findByProps = null, before = null, after = null;
+    var Forms = {}, FormRow = null, FormSection = null, Alert = null;
+    var actionSheet = null, alertManager = null, clipboard = null;
+    var bootError = "尚未启动";
+    var bootSuccess = false;
+    function getSafe(findFn, names) {
+        try { return typeof findFn === "function" ? findFn.apply(null, names) : null; }
+        catch (e) { return null; }
+    }
+    function setupRuntime() {
+        if (!v || !v.metro || !v.patcher || !v.ui) throw Error("没有找到 Vendetta/Bunny 兼容接口");
+        var common = v.metro.common || {};
+        React = common.React;
+        RN = common.ReactNative;
+        findByProps = v.metro.findByProps;
+        before = v.patcher.before;
+        after = v.patcher.after;
+        Forms = (v.ui.components && v.ui.components.Forms) || {};
+        FormRow = Forms.FormRow;
+        FormSection = Forms.FormSection;
+        Alert = v.ui.components && v.ui.components.Alert;
+        clipboard = common.clipboard;
+        actionSheet = getSafe(findByProps, ["openLazy", "hideActionSheet"]);
+        alertManager = getSafe(findByProps, ["openLazy", "close"]);
+        if (!React || !RN || typeof before !== "function" || typeof after !== "function")
+            throw Error("React/ReactNative/patcher 接口缺失");
+    }
     var unpatches = [];
     var touched = new WeakSet();
     var diagnostics = {
@@ -31,7 +50,7 @@
     var ENTRY_ID = "text-selector-edit-message";
 
     function toast(message) {
-        try { v.ui.toasts.showToast(message); } catch (_) { /* Optional */ }
+        try { if (v && v.ui && v.ui.toasts) v.ui.toasts.showToast(message); } catch (_) { /* Optional */ }
     }
 
     function closeAlert() {
@@ -279,6 +298,40 @@
         return insert(items);
     }
 
+    function addToMenuTree(result, props, origin) {
+        if (!active) return result;
+        diagnostics.menuOpened++;
+        try {
+            var content = messageText(props);
+            if (!content) {
+                diagnostics.noMessage++;
+                diagnostics.last = "捕获到菜单，但未读取到 message.content";
+                return result;
+            }
+            if (!FormRow) {
+                diagnostics.last = "客户端缺少 FormRow 组件";
+                return result;
+            }
+            var row = React.createElement(FormRow, {
+                key: ENTRY_ID, id: ENTRY_ID, label: "编辑文字",
+                onPress: function () { openSelector(content); }
+            });
+            if (elementContainsEntry(result, 0)) return result;
+            var change = injectReactTree(result, row, 0);
+            if (!change.changed) change = injectActionSection(result, row, 0);
+            if (change.changed) {
+                diagnostics.inserted++;
+                diagnostics.last = "已向消息菜单添加编辑文字（" + origin + "）";
+                return change.value;
+            }
+            diagnostics.noSection++;
+            diagnostics.last = "已捕获消息，但未匹配到可插入的按钮组";
+            return result;
+        } catch (error) {
+            diagnostics.last = "菜单渲染异常：" + String(error).slice(0, 80);
+            return result;
+        }
+    }
     function patchMessageModule(module, origin) {
         if (!active || !module || (typeof module !== "object" && typeof module !== "function") || touched.has(module)) return;
         var property = typeof module.default === "function" ? "default" : null;
@@ -286,39 +339,7 @@
         try {
             var undo = after(property, module, function (args, result) {
                 if (!active) return result;
-                diagnostics.menuOpened++;
-                try {
-                    var content = messageText(args && args[0]);
-                    if (!content) {
-                        diagnostics.noMessage++;
-                        diagnostics.last = "捕获到菜单，但未读取到 message.content";
-                        return result;
-                    }
-                    if (!FormRow) {
-                        diagnostics.last = "客户端缺少 FormRow 组件";
-                        return result;
-                    }
-                    var row = React.createElement(FormRow, {
-                        key: ENTRY_ID,
-                        id: ENTRY_ID,
-                        label: "编辑文字",
-                        onPress: function () { openSelector(content); }
-                    });
-                    if (elementContainsEntry(result, 0)) return result;
-                    var change = injectReactTree(result, row, 0);
-                    if (!change.changed) change = injectActionSection(result, row, 0);
-                    if (change.changed) {
-                        diagnostics.inserted++;
-                        diagnostics.last = "已向消息菜单添加编辑文字（" + origin + "）";
-                        return change.value;
-                    }
-                    diagnostics.noSection++;
-                    diagnostics.last = "已捕获消息，但未匹配到可插入的按钮组";
-                    return result;
-                } catch (error) {
-                    diagnostics.last = "菜单渲染异常：" + String(error).slice(0, 80);
-                    return result;
-                }
+                return addToMenuTree(result, args && args[0], origin);
             });
             touched.add(module);
             unpatches.push(undo);
@@ -336,10 +357,14 @@
         var names = ["MessageLongPressActionSheet", "MessageActionSheet", "MessageContextMenu"];
         for (var i = 0; i < names.length; i++) {
             try {
-                // `findByName` returns a module object for a default export.
-                // `false` is the same lookup convention used by Vendetta itself.
-                patchMessageModule(findByName(names[i], false), "direct");
-            } catch (_) {}
+                // Current finder implementations return a function with the
+                // default argument and may return a raw module with false.
+                // Patch only real module objects; a bare function cannot be
+                // intercepted by patching a nonexistent .default property.
+                var candidate = findByName(names[i], false);
+                if (candidate && typeof candidate.default === "function")
+                    patchMessageModule(candidate, "direct");
+            } catch (e) { diagnostics.last = "查找消息组件失败: " + String(e).slice(0, 70); }
         }
     }
 
@@ -352,13 +377,43 @@
                 try {
                     var key = args && args[1];
                     if (typeof key !== "string" || !/Message.*(ActionSheet|ContextMenu)/i.test(key)) return;
-                    Promise.resolve(args[0]).then(function (mod) {
-                        if (active) patchMessageModule(mod, "lazy");
-                    }).catch(function () {});
+                    // openLazy receives an IMPORTER FUNCTION, not an already
+                    // imported module. v1.1 did Promise.resolve(importer),
+                    // which silently skipped all these menus.
+                    var importer = args[0];
+                    if (typeof importer !== "function") {
+                        Promise.resolve(importer).then(function (module) {
+                            if (active) patchMessageModule(module, "lazy-promise");
+                        }).catch(function (e) { diagnostics.last = "导入失败:" + String(e); });
+                        return;
+                    }
+                    args[0] = function () {
+                        var self = this, callArgs = arguments;
+                        return Promise.resolve().then(function () {
+                            return importer.apply(self, callArgs);
+                        }).then(function (module) {
+                            if (!active) return module;
+                            if (module && typeof module.default === "function") {
+                                patchMessageModule(module, "lazy-function");
+                            } else if (typeof module === "function") {
+                                // Some importers resolve to a component function
+                                // directly; wrap it instead of assuming .default.
+                                var original = module;
+                                return function (props) {
+                                    var result = original.apply(this, arguments);
+                                    return addToMenuTree(result, props, "lazy-component");
+                                };
+                            }
+                            return module;
+                        }).catch(function (e) {
+                            diagnostics.last = "菜单导入失败:" + String(e).slice(0, 100);
+                            throw e;
+                        });
+                    };
                 } catch (_) {}
             }));
         }
-        var menuModule = findByProps("ContextMenu");
+        var menuModule = getSafe(findByProps, ["ContextMenu"]);
         if (menuModule && typeof menuModule.ContextMenu === "function") {
             unpatches.push(before("ContextMenu", menuModule, function (args) {
                 try {
@@ -379,7 +434,18 @@
         if (active) return;
         active = true;
         generation++;
-        try { installMessageMenu(); } catch (_) { toast("注入文字选择菜单失败"); }
+        try {
+            setupRuntime();
+            bootSuccess = true;
+            bootError = "已启动";
+            installMessageMenu();
+            toast("Text Selector 1.2 已启动（长按菜单测试）");
+        } catch (error) {
+            bootSuccess = false;
+            bootError = String(error);
+            diagnostics.last = "启动失败：" + bootError;
+            toast("Text Selector 启动失败，请查看插件设置");
+        }
     }
 
     function onUnload() {
@@ -402,11 +468,21 @@
     }
 
     function settings() {
-        if (!FormRow || !FormSection) {
-            return React.createElement(RN.Text, {}, "文字选择：长按消息，点击「编辑文字」。");
+        // The settings function must exist even if the plugin could not boot.
+        // It is the simplest way to observe a startup failure on the device.
+        if (!React || !RN || !FormRow || !FormSection) {
+            var react = React || (v && v.metro && v.metro.common && v.metro.common.React);
+            var native = RN || (v && v.metro && v.metro.common && v.metro.common.ReactNative);
+            if (react && native && native.Text)
+                return react.createElement(native.Text, { style: { padding: 16 } }, "Text Selector 1.2 状态：" + bootError);
+            return null;
         }
         return React.createElement(RN.ScrollView, { style: { flex: 1 } },
             React.createElement(FormSection, { title: "文字自由选择" },
+                React.createElement(FormRow, {
+                    label: "启动状态",
+                    subLabel: bootSuccess ? "已启动；" + diagnostics.last : "启动失败；" + bootError
+                }),
                 React.createElement(FormRow, {
                     label: "使用方法",
                     subLabel: "长按文字消息 → 编辑文字 → 长按选取片段 → 复制"
