@@ -15,8 +15,8 @@ test('Vendetta loader receives plugin object, not undefined (ASI regression)', (
   assert.equal(typeof plugin.settings, 'function');
 });
 
-test('manifest points to built file, version is 1.3.0', () => {
-  assert.equal(manifest.version, '1.3.0');
+test('manifest points to built file, version is 1.4.0', () => {
+  assert.equal(manifest.version, '1.4.0');
   assert.equal(manifest.main, 'index.js');
 });
 
@@ -32,6 +32,6 @@ test('load and unload execute under a minimal compatible Vendetta mock', () => {
   };
   const plugin = (0, eval)(`vendetta=>{return ${source}}`)(api);
   plugin.onLoad();
-  assert.ok(notices.some(m => m.includes('1.3 已启动')), notices.join('\n'));
+  assert.ok(notices.some(m => m.includes('1.4 已启动')), notices.join('\n'));
   plugin.onUnload();
 });

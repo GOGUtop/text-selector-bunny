@@ -63,11 +63,15 @@ function setup() {
       }
     },
     ui: {
-      components: { Forms: { FormRow, FormSection }, Alert: 'Alert' },
+      components: { Forms: { FormRow, FormSection } },
       toasts: { showToast(message) { notified.push(message); } },
       alerts: { showCustomAlert(component, props) { opened.push({ component, props }); } }
     }
   };
+  // Mimics a component lookup that hard-crashes Discord 351.11 if accessed.
+  Object.defineProperty(vendetta.ui.components, 'Alert', {
+    get() { throw Error('bunny.metro.byDisplayName(FluxContainer(Alert)) is undefined!'); }
+  });
   const plugin = vm.runInNewContext(code, { vendetta, setTimeout, clearTimeout, Promise, console, WeakSet, Object, Array });
   function before(name, obj, args) {
     for (const x of hooks) if (x.active && x.kind === 'before' && x.name === name && x.obj === obj) x.fn(args);
@@ -119,8 +123,8 @@ test('inject a message action after Copy Text; pass exact original message into 
   const rendered = t.opened[0].component(t.opened[0].props);
   const texts = t.walk(rendered);
   assert.ok(texts.some(e => e.props?.selectable === true && e.props?.children === content));
-  assert.ok(texts.some(e => e.props?.confirmText === '关闭'));
-  texts.find(e => e.props?.cancelText === '复制全文').props.onCancel();
+  assert.ok(texts.some(e => e.props?.children === '关闭' && typeof e.props?.onPress === 'function'));
+  texts.find(e => e.props?.children === '复制全文' && typeof e.props?.onPress === 'function').props.onPress();
   assert.equal(t.copied[0], content);
   t.plugin.onUnload();
 });
@@ -221,8 +225,22 @@ test('settings property is returned even if runtime module lookups throw at load
   const beforeCount = t.hooks.length;
   t.plugin.onLoad();
   assert.equal(typeof t.plugin.settings, 'function');
-  assert.ok(t.notified.some(x => x.includes('1.3 已启动')));
+  assert.ok(t.notified.some(x => x.includes('1.4 已启动')));
   assert.ok(t.hooks.length > beforeCount);
   assert.ok(t.walk(t.plugin.settings()).some(e => e.props?.label === '启动状态'));
+  t.plugin.onUnload();
+});
+
+// Regression for the actual Discord 351.11 + Revenge crash screenshot.
+test('never resolves deprecated FluxContainer(Alert) on load or dialog render', async () => {
+  const t = setup();
+  t.plugin.onLoad();
+  const item = t.walk(t.plugin.settings()).find(e => e.props?.label === '测试文字选择窗口');
+  item.props.onPress();
+  await t.sleep(165);
+  assert.equal(t.opened.length, 1);
+  const element = t.opened[0].component(t.opened[0].props);
+  assert.equal(element.type, 'View');
+  assert.ok(t.walk(element).some(e => e.props?.selectable === true));
   t.plugin.onUnload();
 });

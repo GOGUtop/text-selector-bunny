@@ -7,7 +7,7 @@
     var v = typeof vendetta !== "undefined" ? vendetta :
         (typeof bunny !== "undefined" ? bunny : null);
     var React = null, RN = null, findByProps = null, before = null, after = null;
-    var Forms = {}, FormRow = null, FormSection = null, Alert = null;
+    var Forms = {}, FormRow = null, FormSection = null;
     var actionSheet = null, alertManager = null, clipboard = null;
     var bootError = "尚未启动";
     var bootSuccess = false;
@@ -26,7 +26,6 @@
         Forms = (v.ui.components && v.ui.components.Forms) || {};
         FormRow = Forms.FormRow;
         FormSection = Forms.FormSection;
-        Alert = v.ui.components && v.ui.components.Alert;
         clipboard = common.clipboard;
         actionSheet = getSafe(findByProps, ["openLazy", "hideActionSheet"]);
         alertManager = getSafe(findByProps, ["openLazy", "close"]);
@@ -65,51 +64,58 @@
         closeAlert();
     }
 
+    // This is intentionally a plain React Native component, NOT
+    // v.ui.components.Alert. On Discord 351.11 the legacy component
+    // FluxContainer(Alert) is no longer available and will crash rendering.
+    // showCustomAlert supplies the actual native modal host; we supply its
+    // content with React Native primitives, including a selectable Text.
     function SelectorDialog(props) {
         var text = props.text;
-        var panel = React.createElement(
-            RN.ScrollView,
+        return React.createElement(
+            RN.View,
             {
-                style: { maxHeight: 330, minHeight: 100 },
-                contentContainerStyle: { paddingBottom: 8 },
-                keyboardShouldPersistTaps: "always",
-                nestedScrollEnabled: true
+                style: {
+                    backgroundColor: "#292B32", borderRadius: 16,
+                    paddingHorizontal: 18, paddingTop: 18, paddingBottom: 16,
+                    marginHorizontal: 12, width: "94%", alignSelf: "center"
+                }
             },
+            React.createElement(RN.Text, {
+                style: { color: "#FFFFFF", fontSize: 20, fontWeight: "700", marginBottom: 10 }
+            }, "编辑文字"),
+            React.createElement(RN.Text, {
+                style: { color: "#C5C7CE", fontSize: 13, lineHeight: 20, marginBottom: 12 }
+            }, "长按下面文字，拖动系统选择手柄，然后点「复制」。"),
             React.createElement(
-                RN.View,
-                { style: { backgroundColor: "#F4F4F5", borderRadius: 10, padding: 14 } },
+                RN.ScrollView,
+                {
+                    style: { maxHeight: 380, minHeight: 100, borderRadius: 9, backgroundColor: "#F4F4F5" },
+                    contentContainerStyle: { padding: 14, flexGrow: 1 },
+                    keyboardShouldPersistTaps: "always", nestedScrollEnabled: true
+                },
                 React.createElement(RN.Text, {
                     selectable: true,
                     selectionColor: "#80B7FF",
-                    style: {
-                        color: "#171717", fontSize: 16,
-                        lineHeight: 25, includeFontPadding: false
-                    }
+                    style: { color: "#171717", fontSize: 16, lineHeight: 25, includeFontPadding: false }
                 }, text)
-            )
-        );
-
-        return React.createElement(
-            Alert,
-            {
-                title: "编辑文字",
-                confirmText: "关闭",
-                onConfirm: closeAlert,
-                cancelText: "复制全文",
-                onCancel: function () { copyAll(text); }
+            ),
+            React.createElement(RN.View, {
+                style: { flexDirection: "row", justifyContent: "flex-end", marginTop: 18 }
             },
-            React.createElement(RN.View, { style: { width: "100%", paddingVertical: 4 } },
                 React.createElement(RN.Text, {
-                    style: { color: "#A1A1AA", fontSize: 12, marginBottom: 12 }
-                }, "长按下面的文字，拖动选区手柄，再点系统的「复制」。"),
-                panel
+                    accessibilityRole: "button", onPress: function () { copyAll(text); },
+                    style: { color: "#9EACFF", fontSize: 15, fontWeight: "600", padding: 10 }
+                }, "复制全文"),
+                React.createElement(RN.Text, {
+                    accessibilityRole: "button", onPress: closeAlert,
+                    style: { color: "#FFFFFF", fontSize: 15, fontWeight: "600", padding: 10 }
+                }, "关闭")
             )
         );
     }
-
     function openSelector(text) {
         if (typeof text !== "string" || !text.length) return;
-        if (!Alert || !RN.Text || !RN.ScrollView || !RN.View) {
+        if (!RN || !RN.Text || !RN.ScrollView || !RN.View) {
             toast("当前客户端缺少文字选择界面组件");
             return;
         }
@@ -435,7 +441,7 @@
             bootSuccess = true;
             bootError = "已启动";
             installMessageMenu();
-            toast("Text Selector 1.3 已启动（可以打开设置查看状态）");
+            toast("Text Selector 1.4 已启动（可以打开设置查看状态）");
         } catch (error) {
             bootSuccess = false;
             bootError = String(error);
@@ -470,7 +476,7 @@
             var react = React || (v && v.metro && v.metro.common && v.metro.common.React);
             var native = RN || (v && v.metro && v.metro.common && v.metro.common.ReactNative);
             if (react && native && native.Text)
-                return react.createElement(native.Text, { style: { padding: 16 } }, "Text Selector 1.3 状态：" + bootError);
+                return react.createElement(native.Text, { style: { padding: 16 } }, "Text Selector 1.4 状态：" + bootError);
             return null;
         }
         return React.createElement(RN.ScrollView, { style: { flex: 1 } },

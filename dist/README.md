@@ -1,24 +1,33 @@
-# Text Selector v1.3.0 — 入口修复版
+# Text Selector v1.4.0 — 修复 Discord 351.11 点击「编辑文字」崩溃
 
-## 关键修复
+## 本次修复
 
-旧版 `index.js` 以多行注释开始。Vendetta/旧版 Revenge 通过 `return ${plugin.js}` 执行插件，导致自动分号插入，入口求值结果为 `undefined`，插件没有运行。因此表现为蓝色启用开关但没有设置扳手、没有菜单项。
+v1.3.0 已经能在长按菜单添加「编辑文字」，但打开选择窗口时，
+使用了 `vendetta.ui.components.Alert`。在当前 Discord 351.11 + Revenge
+客户端中，这个旧组件会尝试查找 `FluxContainer(Alert)`，随后崩溃，
+提示 `bunny.metro.byDisplayName(FluxContainer(Alert)) is undefined!`。
 
-v1.3.0 让入口源码的首个字符就是 `(`，并在 `npm run build` 里增加与实际加载器等价的求值烟雾测试。如果将来再次出现此问题，打包会直接报错。
+v1.4.0 **完全不读取这个旧 Alert 组件**：保留已经成功的消息菜单注入，
+将文字窗口改为使用 `vendetta.ui.alerts.showCustomAlert` 和 React Native 的
+`View` / `ScrollView` / `Text selectable`，让系统原生长按文本选择手柄提供局部复制。
+保留「复制全文」「关闭」按钮；不编辑、不发送原消息。
 
-## 使用和安装
+## 安装
 
-本包基于 v1.2.0 的菜单逻辑，重点修复了插件无法启动的问题。菜单注入尚未经过具体设备的实机验证，可能需要根据 Discord 版本再适配。
+1. 如果仍在崩溃界面，先点 `Reload in Safe Mode`，关闭旧插件。
+2. 将此 ZIP 解压，上传**文件夹内部所有文件**到现有的 GitHub `text-selector-bunny` 仓库并覆盖旧文件。
+3. 确保 GitHub Pages 仍为 `main` → `/docs`。
+4. 等 `https://gogutop.github.io/text-selector-bunny/manifest.json` 显示 `1.4.0`。
+5. 返回正常模式，在 Revenge 插件列表更新插件；必要时卸载后重新从原 URL 安装，然后重启 Discord。
+6. 优先在插件设置页运行「测试文字选择窗口」，确认正常后再试消息长按。
 
-1. 解压后把所有文件（尤其 `docs/index.js` 和 `docs/manifest.json`）更新到原 `text-selector-bunny` 仓库；确保 GitHub Pages 发布目录仍为 `main` 的 `/docs`。
-2. GitHub Pages 更新后查看 `https://gogutop.github.io/text-selector-bunny/manifest.json`，确认版本为 `1.3.0`。
-3. 在 Discord 的 Revenge/Bunny 插件页面执行插件更新（如更新不生效，可卸载后重装），之后完全退出并重启 Discord。
-4. 正常情况下：启用插件会提示“Text Selector 1.3 已启动”，扳手变为可用。点开设置页，可以点击“测试文字选择窗口”和“检查菜单注入状态”。
-5. 如果仍没有长按菜单入口，请在插件设置里点“检查菜单注入状态”，把计数和错误消息发回来。这时插件应已运行，可从真实统计数据定位具体的菜单 API 差异。
+安装地址仍为 `https://gogutop.github.io/text-selector-bunny/`。
 
-## 安全性
+## 限制
 
-插件不修改或发送 Discord 消息，不会上传文字内容。打开文字选择窗口后，使用系统文本选区手柄复制片段。
+这里没有真实 Discord 351.11 运行环境，本地测试可证明代码**不再访问**
+出错的旧 Alert 组件，但无法保证你手机上的新窗口已实际正常渲染。
+若新窗口异常，请保留报错图；安全模式能帮助恢复。
 
 ## 源码构建和测试
 
@@ -27,4 +36,4 @@ npm run build
 npm test
 ```
 
-`build.mjs` 内的加载器一致性检查是关键回归测试，不能删除。
+`src/index.js` 第一字符必须是 `(`，避免旧 Vendetta 插件加载器的自动分号插入问题。
