@@ -36,10 +36,14 @@ function setup() {
   const RN = { Text: 'Text', View: 'View', ScrollView: 'ScrollView' };
   const ActionSheet = { openLazy() {}, hideActionSheet() { hidden++; } };
   const Context = { ContextMenu() {} };
+  const MessageSheet = { default() {} };
   const AlertManager = { openLazy() {}, close() { closed++; } };
   const vendetta = {
     metro: {
       common: { React, ReactNative: RN, clipboard: { setString(value) { copied.push(value); } } },
+      findByName(name) {
+        if (name === 'MessageLongPressActionSheet') return MessageSheet;
+      },
       findByProps(...args) {
         if (args[0] === 'openLazy' && args[1] === 'hideActionSheet') return ActionSheet;
         if (args[0] === 'openLazy' && args[1] === 'close') return AlertManager;
@@ -78,7 +82,7 @@ function setup() {
     if (n && n.props) return [n, ...walk(n.props.children)];
     return [];
   }
-  return { plugin, hooks, opened, copied, notified, FormRow, FormSection, ActionSheet, Context, before, after, sleep, walk, get hidden() { return hidden; }, get closed() { return closed; }, React };
+  return { plugin, hooks, opened, copied, notified, FormRow, FormSection, ActionSheet, Context, MessageSheet, before, after, sleep, walk, get hidden() { return hidden; }, get closed() { return closed; }, React };
 }
 
 test('plugin exports lifecycle and settings', () => {
@@ -160,4 +164,33 @@ test('pending dialog is cancelled when plugin unloads', async () => {
   t.plugin.onUnload();
   await t.sleep(170);
   assert.equal(t.opened.length, 0);
+});
+
+
+test('directly patches message sheet already loaded before plugin startup', () => {
+  const t = setup();
+  t.plugin.onLoad();
+  assert.ok(t.hooks.some(x => x.active && x.kind === 'after' && x.obj === t.MessageSheet));
+  const content = '无需先调用 openLazy，也能看到编辑文字';
+  const sections = t.React.createElement('Section', {}, [
+    t.React.createElement(t.FormRow, { label: '回复', onPress() {} }),
+    t.React.createElement(t.FormRow, { label: '复制文字', onPress() {} })
+  ]);
+  const result = t.after('default', t.MessageSheet, [{ message: { content } }], sections);
+  assert.ok(t.walk(result).some(e => e.props?.label === '编辑文字'));
+  t.plugin.onUnload();
+});
+
+test('inserts standalone keyed section when actions are grouped', () => {
+  const t = setup();
+  t.plugin.onLoad();
+  const section = t.React.createElement('ActionSection', { key: 'actions' },
+    t.React.createElement(t.FormRow, { label: '其他操作', onPress() {} }));
+  const tree = t.React.createElement('Root', {}, [section]);
+  const result = t.after('default', t.MessageSheet, [{ message: { content: 'sample' } }], tree);
+  const groups = result.props.children;
+  assert.equal(groups.length, 2);
+  assert.equal(groups[1].key, 'text-selector-edit-message');
+  assert.ok(t.walk(groups[1]).some(e => e.props?.label === '编辑文字'));
+  t.plugin.onUnload();
 });

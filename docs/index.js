@@ -20,6 +20,11 @@
     var clipboard = v.metro.common.clipboard;
     var unpatches = [];
     var touched = new WeakSet();
+    var diagnostics = {
+        foundDirect: 0, foundLazy: 0, menuOpened: 0,
+        inserted: 0, noMessage: 0, noSection: 0,
+        last: "插件已启动，等待长按文字消息"
+    };
     var active = false;
     var generation = 0;
     var pending = [];
@@ -149,8 +154,66 @@
 
     // Locate an action group rather than tampering with reactions or message renderers.
     // Prefer placing the row right below Discord's existing Copy Text action.
+    function elementContainsAction(node, depth) {
+        if (depth > 12 || node == null) return false;
+        if (Array.isArray(node)) {
+            for (var i = 0; i < node.length; i++) {
+                if (elementContainsAction(node[i], depth + 1)) return true;
+            }
+            return false;
+        }
+        if (!React.isValidElement(node)) return false;
+        var p = node.props || {};
+        if (node.type === FormRow && (typeof p.onPress === "function" || p.label != null)) return true;
+        return elementContainsAction(p.children, depth + 1);
+    }
+
+    function elementContainsEntry(node, depth) {
+        if (depth > 12 || node == null) return false;
+        if (Array.isArray(node)) {
+            for (var i = 0; i < node.length; i++) if (elementContainsEntry(node[i], depth + 1)) return true;
+            return false;
+        }
+        if (!React.isValidElement(node)) return false;
+        return hasOurEntry(node) || elementContainsEntry(node.props && node.props.children, depth + 1);
+    }
+
+    // Some Discord builds use keyed ActionSection components instead of a flat
+    // FormRow list. Vendetta's own quick-install feature patches these sections.
+    function injectActionSection(node, row, depth) {
+        if (depth > 18 || node == null) return { value: node, changed: false };
+        if (Array.isArray(node)) {
+            if (node.length > 0 && node.every(function (entry) {
+                return React.isValidElement(entry) && entry.key != null;
+            }) && node.some(function (entry) { return elementContainsAction(entry, 0); })) {
+                if (elementContainsEntry(node, 0)) return { value: node, changed: false };
+                var sectionIndex = node.findIndex(function (entry) { return elementContainsAction(entry, 0); });
+                var SectionType = node[sectionIndex].type;
+                var group = React.createElement(SectionType, { key: ENTRY_ID }, row);
+                var sections = node.slice();
+                sections.splice(sectionIndex + 1, 0, group);
+                return { value: sections, changed: true };
+            }
+            for (var i = 0; i < node.length; i++) {
+                var nested = injectActionSection(node[i], row, depth + 1);
+                if (nested.changed) {
+                    var copy = node.slice();
+                    copy[i] = nested.value;
+                    return { value: copy, changed: true };
+                }
+            }
+            return { value: node, changed: false };
+        }
+        if (!React.isValidElement(node)) return { value: node, changed: false };
+        var children = node.props && node.props.children;
+        if (children == null) return { value: node, changed: false };
+        var changed = injectActionSection(children, row, depth + 1);
+        if (!changed.changed) return { value: node, changed: false };
+        return { value: React.cloneElement(node, {}, changed.value), changed: true };
+    }
+
     function injectReactTree(node, row, depth) {
-        if (depth > 14) return { value: node, changed: false };
+        if (depth > 18) return { value: node, changed: false };
         if (Array.isArray(node)) {
             var copyIndex = -1;
             var rowCount = 0;
@@ -216,39 +279,84 @@
         return insert(items);
     }
 
-    function patchMessageModule(promise) {
-        var stamp = generation;
-        Promise.resolve(promise).then(function (module) {
-            if (!active || stamp !== generation || !module || typeof module.default !== "function" || touched.has(module)) return;
-            var undo = after("default", module, function (args, result) {
+    function patchMessageModule(module, origin) {
+        if (!active || !module || (typeof module !== "object" && typeof module !== "function") || touched.has(module)) return;
+        var property = typeof module.default === "function" ? "default" : null;
+        if (!property) return;
+        try {
+            var undo = after(property, module, function (args, result) {
                 if (!active) return result;
+                diagnostics.menuOpened++;
                 try {
                     var content = messageText(args && args[0]);
-                    if (!content || !FormRow) return result;
+                    if (!content) {
+                        diagnostics.noMessage++;
+                        diagnostics.last = "捕获到菜单，但未读取到 message.content";
+                        return result;
+                    }
+                    if (!FormRow) {
+                        diagnostics.last = "客户端缺少 FormRow 组件";
+                        return result;
+                    }
                     var row = React.createElement(FormRow, {
                         key: ENTRY_ID,
                         id: ENTRY_ID,
                         label: "编辑文字",
                         onPress: function () { openSelector(content); }
                     });
-                    return injectReactTree(result, row, 0).value;
-                } catch (_) { return result; }
+                    if (elementContainsEntry(result, 0)) return result;
+                    var change = injectReactTree(result, row, 0);
+                    if (!change.changed) change = injectActionSection(result, row, 0);
+                    if (change.changed) {
+                        diagnostics.inserted++;
+                        diagnostics.last = "已向消息菜单添加编辑文字（" + origin + "）";
+                        return change.value;
+                    }
+                    diagnostics.noSection++;
+                    diagnostics.last = "已捕获消息，但未匹配到可插入的按钮组";
+                    return result;
+                } catch (error) {
+                    diagnostics.last = "菜单渲染异常：" + String(error).slice(0, 80);
+                    return result;
+                }
             });
             touched.add(module);
             unpatches.push(undo);
-        }).catch(function () {});
+            if (origin === "direct") diagnostics.foundDirect++;
+            else diagnostics.foundLazy++;
+            diagnostics.last = "已挂接消息菜单组件（" + origin + "）";
+        } catch (error) {
+            diagnostics.last = "菜单挂接失败：" + String(error).slice(0, 80);
+        }
+    }
+
+    function patchDirectMessageComponents() {
+        var findByName = v.metro.findByName;
+        if (typeof findByName !== "function") return;
+        var names = ["MessageLongPressActionSheet", "MessageActionSheet", "MessageContextMenu"];
+        for (var i = 0; i < names.length; i++) {
+            try {
+                // `findByName` returns a module object for a default export.
+                // `false` is the same lookup convention used by Vendetta itself.
+                patchMessageModule(findByName(names[i], false), "direct");
+            } catch (_) {}
+        }
     }
 
     function installMessageMenu() {
-        var found = false;
+        // Attach to already-registered Discord message components. Patching only
+        // openLazy misses menu components that are imported before the plugin runs.
+        patchDirectMessageComponents();
         if (actionSheet && typeof actionSheet.openLazy === "function") {
             unpatches.push(before("openLazy", actionSheet, function (args) {
-                var key = args && args[1];
-                if (key === "MessageLongPressActionSheet" || key === "MessageActionSheet" || key === "MessageContextMenu") {
-                    patchMessageModule(args[0]);
-                }
+                try {
+                    var key = args && args[1];
+                    if (typeof key !== "string" || !/Message.*(ActionSheet|ContextMenu)/i.test(key)) return;
+                    Promise.resolve(args[0]).then(function (mod) {
+                        if (active) patchMessageModule(mod, "lazy");
+                    }).catch(function () {});
+                } catch (_) {}
             }));
-            found = true;
         }
         var menuModule = findByProps("ContextMenu");
         if (menuModule && typeof menuModule.ContextMenu === "function") {
@@ -258,12 +366,13 @@
                     var text = messageText(props);
                     if (text && Array.isArray(props.items)) {
                         args[0] = Object.assign({}, props, { items: injectContextItems(props.items, text) });
+                        diagnostics.inserted++;
+                        diagnostics.last = "已注入 ContextMenu 项";
                     }
                 } catch (_) {}
             }));
-            found = true;
         }
-        if (!found) toast("未找到长按菜单接口；可在插件设置里测试文字选择窗口");
+        if (!diagnostics.foundDirect) diagnostics.last = "未定位到已加载消息组件，等待长按菜单触发";
     }
 
     function onLoad() {
@@ -283,6 +392,13 @@
         }
         unpatches = [];
         touched = new WeakSet();
+        diagnostics.foundDirect = 0;
+        diagnostics.foundLazy = 0;
+        diagnostics.menuOpened = 0;
+        diagnostics.inserted = 0;
+        diagnostics.noMessage = 0;
+        diagnostics.noSection = 0;
+        diagnostics.last = "插件已停用";
     }
 
     function settings() {
@@ -299,6 +415,22 @@
                     label: "测试文字选择窗口",
                     onPress: function () {
                         openSelector("这是一条测试消息。你可以长按任意汉字，然后拖动选择手柄，只复制需要的部分。\nThis is an English example too.");
+                    }
+                }),
+                React.createElement(FormRow, {
+                    label: "检查菜单注入状态",
+                    subLabel: "长按一次普通文字消息后点这里查看诊断",
+                    onPress: function () {
+                        var summary = "直接挂接:" + diagnostics.foundDirect +
+                            " 懒加载挂接:" + diagnostics.foundLazy +
+                            " 菜单渲染:" + diagnostics.menuOpened +
+                            " 成功注入:" + diagnostics.inserted +
+                            " 未读取到文字:" + diagnostics.noMessage +
+                            " 未识别布局:" + diagnostics.noSection +
+                            "；" + diagnostics.last;
+                        if (v.ui.alerts && typeof v.ui.alerts.showConfirmationAlert === "function") {
+                            v.ui.alerts.showConfirmationAlert({title: "Text Selector 诊断", content: summary, confirmText: "知道了"});
+                        } else toast(summary);
                     }
                 }),
                 React.createElement(FormRow, {

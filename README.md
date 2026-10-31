@@ -1,5 +1,7 @@
 # Text Selector · 编辑文字（Bunny / Vendetta）
 
+**v1.1.0 更新：** 新增直接挂接 `MessageLongPressActionSheet` 的方案，以及 keyed ActionSection 按钮组兼容逻辑。设置内提供「检查菜单注入状态」诊断功能。仅完成本地模拟验证，尚未验证目标手机。
+
 独立的 Discord 手机端插件。在**长按文字消息**的菜单中尝试添加「编辑文字」入口，以原文打开可选择的文字窗口。你可以长按文字、拖动系统选择手柄、复制一小段，不需要手动重打，也不会修改 Discord 服务器上的消息。
 
 ## 安装（手机 GitHub 上传，无需编译）
